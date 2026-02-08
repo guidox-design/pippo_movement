@@ -6,7 +6,7 @@ enum STATE {
 	JUMP,
 	DOUBLE_JUMP,
 	FLOAT,
-	LEDGE_CLIMBE,
+	LEDGE_CLIMB,
 	LEDGE_JUMP,
 }
 
@@ -24,16 +24,21 @@ const FLOAT_VELOCITY := 100.0
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite
 @onready var coyote_timer: Timer = $CoyoteTimer
 @onready var float_cool_down: Timer = $FloatCoolDown
+@onready var player_collider: CollisionObject2D = $PlayerCollider
+@onready var ledge_climb_ray_cast: RayCast2D = $LedgeClimbRayCast
+@onready var ledge_space_ray_cast: RayCast2D = $LedgeSpaceRayCast
+
+
 
 
 var active_state := STATE.FALL
 var can_double_jump := false
-
+var facing_direction := 1.0
 
 
 func _ready() -> void:
 	switch_state(active_state)
-
+	ledge_climb_ray_cast.add_exception(self)
 
 
 
@@ -78,8 +83,14 @@ func switch_state(to_state: STATE) -> void:
 				return
 			animated_sprite.play("float")
 			velocity.y = 0
-	
-	
+
+		STATE.LEDGE_CLIMB:
+			animated_sprite.play("ledge_climb")
+			velocity = Vector2.ZERO
+			global_position.y = ledge_climb_ray_cast.get_collision_point().y
+			can_double_jump = true
+
+
 func process_state(delta: float) -> void:
 	match active_state:
 		
@@ -136,5 +147,18 @@ func handle_movement() -> void:
 	var input_direction := signf(Input.get_axis("move_left", "move_right"))
 	if input_direction:
 		animated_sprite.flip_h = input_direction < 0
+		facing_direction = input_direction
+		ledge_climb_ray_cast.position.x = input_direction * absf(ledge_climb_ray_cast.position.x)
+		ledge_climb_ray_cast.target_position.x = input_direction * absf(ledge_climb_ray_cast.target_position.x)
+		ledge_climb_ray_cast.force_raycast_update()
+
 	velocity.x = input_direction * WALK_VELOCITY
+
+func is_input_toward_facing() -> bool:
+	return signf(Input.get_axis("move_left", "move_right")) == facing_direction
+
+func is_ledge() -> bool:
+	return is_on_wall_only() and \
+	ledge_climb_ray_cast.is_colliding() and \
+	ledge_climb_ray_cast.get_collision_normal().is_equal_approx(Vector2.UP)
 
