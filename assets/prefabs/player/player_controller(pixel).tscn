@@ -662,3 +662,8 @@ target_position = Vector2(11, 22)
 unique_name_in_owner = true
 position = Vector2(-18, 22)
 target_position = Vector2(0, -53)
+
+[node name="WallSlideRayCast" type="RayCast2D" parent="."]
+unique_name_in_owner = true
+position = Vector2(3, -14)
+target_position = Vector2(16, 0)

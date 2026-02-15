@@ -9,6 +9,11 @@ enum STATE {
 	LEDGE_CLIMB,
 	LEDGE_JUMP,
 	ATTACK,
+	WALL_SLIDE,
+	WALL_JUMP,
+	WALL_CLIMB,
+	DASH,
+	TURNING,
 }
 
 const FALL_GRAVITY := 1500.0
@@ -19,6 +24,9 @@ const JUMP_DECELERATION := 1500.0
 const DOUBLE_JUMP_VELOCITY := -450.0
 const FLOAT_GRAVITY := 200.0
 const FLOAT_VELOCITY := 100.0
+const LEDGE_JUMP_VELOCITY := -500
+const WALL_SLIDE_GRAVITY := 300.0
+const WALL_SLIDE_VELOCITY := 500.0
 
 
 
@@ -28,7 +36,7 @@ const FLOAT_VELOCITY := 100.0
 @onready var player_collider: CollisionShape2D = $PlayerCollider
 @onready var ledge_climb_ray_cast: RayCast2D = $LedgeClimbRayCast
 @onready var ledge_space_ray_cast: RayCast2D = $LedgeSpaceRayCast
-
+@onready var wall_slide_ray_cast: RayCast2D = $WallSlideRayCast
 
 
 
@@ -47,7 +55,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	process_state(delta)
 	move_and_slide()
-
+	#handle_input()
 	
 	
 	
@@ -92,6 +100,16 @@ func switch_state(to_state: STATE) -> void:
 			global_position.y = ledge_climb_ray_cast.get_collision_point().y
 			can_double_jump = true
 
+
+		STATE.LEDGE_JUMP:
+			animated_sprite.play("double_jump")
+			velocity.y = LEDGE_JUMP_VELOCITY
+
+
+		STATE.WALL_SLIDE:
+			animated_sprite.play("wall_slide")
+			velocity.y = 0
+			can_double_jump = true
 		#STATE.ATTACK:
 		#	animated_sprite.play("attacco_pippo")
 
@@ -116,7 +134,9 @@ func process_state(delta: float) -> void:
 					switch_state(STATE.FLOAT)
 			elif is_input_toward_facing() and is_ledge() and is_space():
 				switch_state(STATE.LEDGE_CLIMB)
-				
+			elif is_input_toward_facing() and can_wall_sliding():
+				switch_state(STATE.WALL_SLIDE)
+
 		STATE.FLOOR:
 			if Input.get_axis("move_left", "move_right"):
 				animated_sprite.play("walk")
@@ -130,7 +150,7 @@ func process_state(delta: float) -> void:
 			elif Input.is_action_just_pressed("jump"):
 				switch_state(STATE.JUMP)
 
-		STATE.JUMP, STATE.DOUBLE_JUMP:
+		STATE.JUMP, STATE.DOUBLE_JUMP, STATE.LEDGE_JUMP:
 			velocity.y = move_toward(velocity.y, 0, JUMP_DECELERATION * delta)
 			handle_movement()
 			
@@ -151,6 +171,9 @@ func process_state(delta: float) -> void:
 				switch_state(STATE.FALL)
 			elif is_input_toward_facing() and is_ledge() and is_space():
 				switch_state(STATE.LEDGE_CLIMB)
+			elif is_input_toward_facing() and can_wall_sliding():
+				switch_state(STATE.WALL_SLIDE)
+
 
 		STATE.LEDGE_CLIMB:
 			if not animated_sprite.is_playing():
@@ -159,6 +182,26 @@ func process_state(delta: float) -> void:
 				offset.x *= facing_direction
 				position += offset
 				switch_state(STATE.FLOOR)
+			elif Input.is_action_just_pressed("jump"):
+				var progress := inverse_lerp(0, animated_sprite.sprite_frames.get_frame_count("ledge_climb"), animated_sprite.frame)
+				var offset := ledge_climb_offset()
+				offset.x *= facing_direction * progress
+				position += offset 
+				switch_state(STATE.LEDGE_JUMP)
+
+
+		STATE.WALL_SLIDE:
+			velocity.y = move_toward(velocity.y, WALL_SLIDE_VELOCITY, WALL_SLIDE_GRAVITY * delta)
+			handle_movement()
+
+			if is_on_floor():
+				switch_state(STATE.FLOOR)
+			
+			elif is_ledge() and is_space():
+				switch_state(STATE.LEDGE_CLIMB)
+			
+			elif not can_wall_sliding():
+				switch_state(STATE.FALL) 
 
 #		STATE.ATTACK:
 #			process_attack()
@@ -171,15 +214,17 @@ func handle_movement() -> void:
 		facing_direction = input_direction
 		ledge_climb_ray_cast.position.x = input_direction * absf(ledge_climb_ray_cast.position.x)
 		ledge_climb_ray_cast.target_position.x = input_direction * absf(ledge_climb_ray_cast.target_position.x)
-		ledge_climb_ray_cast.force_raycast_update()
-
+		wall_slide_ray_cast.force_raycast_update()
+		wall_slide_ray_cast.position.x = input_direction * absf(wall_slide_ray_cast.position.x)
+		wall_slide_ray_cast.target_position.x = input_direction * absf(wall_slide_ray_cast.target_position.x)
+		wall_slide_ray_cast.force_raycast_update()
 
 
 	velocity.x = input_direction * WALK_VELOCITY
 
 
 func is_input_toward_facing() -> bool:
-	return signf(Input.get_axis("move_left", "move_right") == facing_direction)
+	return signf(Input.get_axis("move_left", "move_right")) == facing_direction
 
 
 func is_ledge() -> bool:
@@ -203,7 +248,8 @@ func ledge_climb_offset() -> Vector2:
 
 
 
-
+func can_wall_sliding() -> bool:
+	return is_on_wall_only() and wall_slide_ray_cast.is_colliding()
 
 
 
