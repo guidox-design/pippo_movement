@@ -8,6 +8,7 @@ enum STATE {
 	FLOAT,
 	LEDGE_CLIMB,
 	LEDGE_JUMP,
+	ATTACK,
 }
 
 const FALL_GRAVITY := 1500.0
@@ -24,7 +25,7 @@ const FLOAT_VELOCITY := 100.0
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite
 @onready var coyote_timer: Timer = $CoyoteTimer
 @onready var float_cool_down: Timer = $FloatCoolDown
-@onready var player_collider: CollisionObject2D = $PlayerCollider
+@onready var player_collider: CollisionShape2D = $PlayerCollider
 @onready var ledge_climb_ray_cast: RayCast2D = $LedgeClimbRayCast
 @onready var ledge_space_ray_cast: RayCast2D = $LedgeSpaceRayCast
 
@@ -46,6 +47,7 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	process_state(delta)
 	move_and_slide()
+
 	
 	
 	
@@ -90,6 +92,10 @@ func switch_state(to_state: STATE) -> void:
 			global_position.y = ledge_climb_ray_cast.get_collision_point().y
 			can_double_jump = true
 
+		#STATE.ATTACK:
+		#	animated_sprite.play("attacco_pippo")
+
+
 
 func process_state(delta: float) -> void:
 	match active_state:
@@ -108,6 +114,8 @@ func process_state(delta: float) -> void:
 					switch_state(STATE.DOUBLE_JUMP)
 				else:
 					switch_state(STATE.FLOAT)
+			elif is_input_toward_facing() and is_ledge() and is_space():
+				switch_state(STATE.LEDGE_CLIMB)
 				
 		STATE.FLOOR:
 			if Input.get_axis("move_left", "move_right"):
@@ -129,6 +137,7 @@ func process_state(delta: float) -> void:
 			if Input.is_action_just_released("jump") or velocity.y >= 0:
 				velocity.y = 0
 				switch_state(STATE.FALL)
+				
 
 
 		STATE.FLOAT:
@@ -140,7 +149,19 @@ func process_state(delta: float) -> void:
 			elif Input.is_action_just_released("jump"):
 				float_cool_down.start()
 				switch_state(STATE.FALL)
-			
+			elif is_input_toward_facing() and is_ledge() and is_space():
+				switch_state(STATE.LEDGE_CLIMB)
+
+		STATE.LEDGE_CLIMB:
+			if not animated_sprite.is_playing():
+				animated_sprite.play("idle")
+				var offset := ledge_climb_offset()
+				offset.x *= facing_direction
+				position += offset
+				switch_state(STATE.FLOOR)
+
+#		STATE.ATTACK:
+#			process_attack()
 			
 			
 func handle_movement() -> void:
@@ -152,13 +173,53 @@ func handle_movement() -> void:
 		ledge_climb_ray_cast.target_position.x = input_direction * absf(ledge_climb_ray_cast.target_position.x)
 		ledge_climb_ray_cast.force_raycast_update()
 
+
+
 	velocity.x = input_direction * WALK_VELOCITY
 
+
 func is_input_toward_facing() -> bool:
-	return signf(Input.get_axis("move_left", "move_right")) == facing_direction
+	return signf(Input.get_axis("move_left", "move_right") == facing_direction)
+
 
 func is_ledge() -> bool:
 	return is_on_wall_only() and \
 	ledge_climb_ray_cast.is_colliding() and \
 	ledge_climb_ray_cast.get_collision_normal().is_equal_approx(Vector2.UP)
 
+func is_space() -> bool:
+	ledge_space_ray_cast.global_position = ledge_space_ray_cast.get_collision_point()
+	ledge_space_ray_cast.force_raycast_update()
+	return not ledge_space_ray_cast.is_colliding()
+
+
+func ledge_climb_offset() -> Vector2:
+	var shape := player_collider.shape
+	if shape is CapsuleShape2D:
+		return Vector2(shape.radius * 2.0, -shape.height * 0.5)
+	if shape is RectangleShape2D:
+		return Vector2(shape.size.x, -shape.size.y * 0.5)
+	return Vector2.ZERO
+
+
+
+
+
+
+
+
+
+
+
+
+
+#func handle_input():
+#	if Input.is_action_just_pressed("attack"):
+#		if active_state != STATE.ATTACK:
+#			switch_state(STATE.ATTACK)
+#
+#func process_attack():
+#	velocity.x = 0
+#
+#	if not animated_sprite.is_playing():
+#		switch_state(STATE.FLOOR)
