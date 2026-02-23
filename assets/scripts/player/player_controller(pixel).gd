@@ -33,6 +33,8 @@ const WALL_CLIMB_VELOCITY := -300.0
 const WALL_CLIMB_LENGTH := 65.0
 const DASH_LENGTH := 100.0
 const DASH_VELOCITY := 600.0
+const SPRINT_VELOCITY := 400.0
+const SPRINT_ACCELERATION := 1800.0
 
 
 
@@ -52,6 +54,7 @@ var facing_direction := 1.0
 var saved_position := Vector2.ZERO
 var can_dash := false
 var dash_jump_buffer := false
+var is_sprinting := false
 
 
 func _ready() -> void:
@@ -87,7 +90,8 @@ func switch_state(to_state: STATE) -> void:
 			can_dash = true
 			
 		STATE.JUMP:
-			animated_sprite.play("jump")
+			if previous_state != STATE.TURNING:
+				animated_sprite.play("jump")
 			velocity.y = JUMP_VELOCITY
 			coyote_timer.stop()
 		
@@ -95,6 +99,7 @@ func switch_state(to_state: STATE) -> void:
 			animated_sprite.play("double_jump")
 			velocity.y = DOUBLE_JUMP_VELOCITY
 			can_double_jump = false
+			is_sprinting = false
 	
 	
 		STATE.FLOAT:
@@ -103,6 +108,7 @@ func switch_state(to_state: STATE) -> void:
 				return
 			animated_sprite.play("float")
 			velocity.y = 0
+			is_sprinting = false
 
 		STATE.LEDGE_CLIMB:
 			animated_sprite.play("ledge_climb")
@@ -115,12 +121,14 @@ func switch_state(to_state: STATE) -> void:
 			animated_sprite.play("double_jump")
 			velocity.y = LEDGE_JUMP_VELOCITY
 			can_dash = true
+			is_sprinting = false
 
 		STATE.WALL_SLIDE:
 			animated_sprite.play("wall_slide")
 			velocity.y = 0
 			can_double_jump = true
 			can_dash = true
+			is_sprinting = false
 
 		STATE.WALL_JUMP:
 			animated_sprite.play("jump")
@@ -147,12 +155,19 @@ func switch_state(to_state: STATE) -> void:
 			dash_jump_buffer = false
 
 
+		STATE.TURNING:
+			set_facing_direction(-facing_direction)
+
+
 func process_state(delta: float) -> void:
 	match active_state:
 		
 		STATE.FALL:
 			velocity.y = move_toward(velocity.y, FALL_VELOCITY, FALL_GRAVITY * delta)
-			handle_movement()
+			if is_sprinting:
+				handle_sprint(delta)
+			else:
+				handle_movement()
 			
 			if is_on_floor():
 				switch_state(STATE.FLOOR)
@@ -172,11 +187,15 @@ func process_state(delta: float) -> void:
 				switch_state(STATE.DASH)
 
 		STATE.FLOOR:
-			if Input.get_axis("move_left", "move_right"):
-				animated_sprite.play("walk")
+			if is_sprinting:
+				animated_sprite.play("sprint")
+				handle_sprint(delta)
 			else:
-				animated_sprite.play("idle")
-			handle_movement()
+				if Input.get_axis("move_left", "move_right"):
+					animated_sprite.play("walk")
+				else:
+					animated_sprite.play("idle")
+				handle_movement()
 			
 			if not is_on_floor():
 				switch_state(STATE.FALL)
@@ -186,6 +205,8 @@ func process_state(delta: float) -> void:
 
 			elif Input.is_action_just_pressed("sprint"):
 				switch_state(STATE.DASH)
+			elif is_sprinting and is_input_against_facing():
+				switch_state(STATE.TURNING)	
 
 
 		STATE.JUMP, STATE.DOUBLE_JUMP, STATE.LEDGE_JUMP, STATE.WALL_JUMP:
@@ -197,7 +218,10 @@ func process_state(delta: float) -> void:
 				else:
 					handle_movement(facing_direction)
 
-			if active_state != STATE.WALL_JUMP:
+			if is_sprinting:
+				handle_sprint(delta)
+
+			elif active_state != STATE.WALL_JUMP:
 				handle_movement()
 			
 			if Input.is_action_just_released("jump") or velocity.y >= 0:
@@ -230,6 +254,7 @@ func process_state(delta: float) -> void:
 
 
 		STATE.LEDGE_CLIMB:
+			is_sprinting = Input.is_action_pressed("sprint")
 			if not animated_sprite.is_playing():
 				animated_sprite.play("idle")
 				var offset := ledge_climb_offset()
@@ -276,6 +301,7 @@ func process_state(delta: float) -> void:
 				switch_state(STATE.LEDGE_JUMP)
 
 		STATE.DASH:
+			is_sprinting = Input.is_action_pressed("sprint")
 			dash_cooldown.start()
 			if is_on_floor():
 				coyote_timer.start()
@@ -294,15 +320,32 @@ func process_state(delta: float) -> void:
 				switch_state(STATE.LEDGE_CLIMB)
 			elif can_wall_sliding():
 				switch_state(STATE.WALL_SLIDE)
-			
+
+		STATE.TURNING:
+			if signf(velocity.x) == facing_direction and is_input_against_facing():
+				set_facing_direction(-facing_direction)
+			handle_sprint(delta)
+
+			if not is_on_floor():
+				switch_state(STATE.FALL)
+			elif not is_sprinting or velocity.x * facing_direction >= SPRINT_VELOCITY:
+				switch_state(STATE.FLOOR)
+			elif Input.is_action_just_pressed("jump"):
+				animated_sprite.play("double_jump")
+				is_sprinting = false
+				switch_state(STATE.JUMP)
 
 
 	
-func handle_movement(input_direction: float = 0) -> void:
+func handle_movement(input_direction: float = 0, horizontal_movement: float = WALK_VELOCITY, step: float = WALK_VELOCITY) -> void:
 	if input_direction == 0: 
 		input_direction = signf(Input.get_axis("move_left", "move_right"))
 	set_facing_direction(input_direction)
-	velocity.x = input_direction * WALK_VELOCITY
+	velocity.x = move_toward(velocity.x, input_direction * horizontal_movement, step)
+
+func handle_sprint(delta: float) -> void:
+	handle_movement(facing_direction, SPRINT_VELOCITY, SPRINT_ACCELERATION * delta)
+	is_sprinting = Input.is_action_pressed("sprint") and not is_on_wall()
 
 
 func set_facing_direction(direction: float) -> void:
@@ -323,6 +366,10 @@ func set_facing_direction(direction: float) -> void:
 #verifica che l'input del player sia lo stesso della direzione del personaggio
 func is_input_toward_facing() -> bool:
 	return signf(Input.get_axis("move_left", "move_right")) == facing_direction
+
+func is_input_against_facing() -> bool:
+	return signf(Input.get_axis("move_left", "move_right")) == -facing_direction
+
 
 
 func is_ledge() -> bool:
